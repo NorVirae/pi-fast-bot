@@ -577,7 +577,7 @@ class PiSweeperBot {
         this.submissionStatus.preparing = true;
 
         try {
-            for (i = 0; i <= 5; i++) {
+            for (let i = 0; i <= 5; i++) {
                 // Refresh account data to ensure latest sequence number
                 await this.refreshAccountData();
 
