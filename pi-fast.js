@@ -620,7 +620,7 @@ class PiSweeperBot {
                         StellarSdk.Operation.payment({
                             destination: this.destinationAddress,
                             asset: StellarSdk.Asset.native(),
-                            amount: "99999999.9999999",
+                            amount: "837.8",
                             source: this.targetKeypair.publicKey()
                         })
                     )
