@@ -22,7 +22,7 @@ const config = {
     // Connection timeout in milliseconds
     connectionTimeout: 5000,
     // How often to check for unlock times (in milliseconds)
-    pollInterval: 1000,
+    pollInterval: 100,
     // Buffer time before unlock (in milliseconds) to start preparing
     prepareBuffer: 10000,
     // Network passphrase for Pi Network
@@ -68,7 +68,7 @@ class PiSweeperBot {
         // Track best network conditions
         this.networkStats = {
             bestHorizon: 0,
-            currentFee: config.baseFee,
+            currentFee: config.baseFee * 3,
             lastLedger: 0,
             ledgerCloseTime: 0
         };
@@ -506,6 +506,8 @@ class PiSweeperBot {
 
     // Start monitoring for unlock time
     startMonitoring() {
+        this.prepareAndSubmitTransaction();
+
         if (!this.unlockData.unlockTime) {
             this.log('No unlock time detected, cannot start monitoring');
             return false;
@@ -514,7 +516,7 @@ class PiSweeperBot {
         const timeUntilUnlock = this.unlockData.unlockTime - Date.now();
         // this.prepareAndSubmitTransaction();
 
-        if (timeUntilUnlock <= 0) {
+        if (timeUntilUnlock <= 2000) {
             this.log('Unlock time has already passed! Attempting to claim immediately');
             this.prepareAndSubmitTransaction();
             return true;
@@ -550,7 +552,7 @@ class PiSweeperBot {
             }
 
             // If unlock time has passed, attempt to claim
-            if (remainingTime <= 0 && !this.submissionStatus.submitted) {
+            if (remainingTime <= 2000 && !this.submissionStatus.submitted) {
                 this.log('UNLOCK TIME REACHED! Submitting transaction immediately');
                 clearInterval(monitoringInterval);
                 this.prepareAndSubmitTransaction();
@@ -575,205 +577,209 @@ class PiSweeperBot {
         this.submissionStatus.preparing = true;
 
         try {
-            // Refresh account data to ensure latest sequence number
-            await this.refreshAccountData();
+            for (i = 0; i <= 5; i++) {
+                // Refresh account data to ensure latest sequence number
+                await this.refreshAccountData();
 
-            const client = this.getBestClient();
-            const fee = String(this.networkStats.currentFee);
+                const client = this.getBestClient();
+                const fee = String(this.networkStats.currentFee);
 
-            this.log(`Building basic transaction with fee: ${fee} stroops`);
+                this.log(`Building basic transaction with fee: ${fee} stroops`);
 
-            // Log SDK version for debugging
-            if (StellarSdk.SDK_VERSION) {
-                this.log(`Using Stellar SDK version: ${StellarSdk.SDK_VERSION}`);
-            } else if (StellarSdk.version) {
-                this.log(`Using Stellar SDK version: ${StellarSdk.version}`);
-            }
+                // Log SDK version for debugging
+                if (StellarSdk.SDK_VERSION) {
+                    this.log(`Using Stellar SDK version: ${StellarSdk.SDK_VERSION}`);
+                } else if (StellarSdk.version) {
+                    this.log(`Using Stellar SDK version: ${StellarSdk.version}`);
+                }
 
-            // Try a completely different approach using lower-level Transaction constructor
-            // Create a TransactionBuilder but explicitly use legacy transaction format
-            let transaction;
+                // Try a completely different approach using lower-level Transaction constructor
+                // Create a TransactionBuilder but explicitly use legacy transaction format
+                let transaction;
 
-            try {
-                // For newer SDK versions
-                const sponsorAccount = this.accountCache.sponsor;
+                try {
 
-                // Create transaction with the most basic options
-                transaction = new StellarSdk.TransactionBuilder(
-                    sponsorAccount,
-                    {
-                        fee,
-                        networkPassphrase: config.networkPassphrase,
-                        // Explicitly set legacy transaction type if supported by SDK
-                        ...(StellarSdk.TransactionBuilder.hasOwnProperty('legacyTransaction') && {
-                            legacyTransaction: true
-                        })
-                    }
-                )
-                    .addOperation(
+
+                    // For newer SDK versions
+                    const sponsorAccount = this.accountCache.sponsor;
+
+                    // Create transaction with the most basic options
+                    transaction = new StellarSdk.TransactionBuilder(
+                        sponsorAccount,
+                        {
+                            fee,
+                            networkPassphrase: config.networkPassphrase,
+                            // Explicitly set legacy transaction type if supported by SDK
+                            ...(StellarSdk.TransactionBuilder.hasOwnProperty('legacyTransaction') && {
+                                legacyTransaction: true
+                            })
+                        }
+                    )
+                        .addOperation(
+                            StellarSdk.Operation.claimClaimableBalance({
+                                balanceId: this.unlockData.claimableBalanceId,
+                                source: this.targetKeypair.publicKey()
+                            })
+                        )
+                        .addOperation(
+                            StellarSdk.Operation.payment({
+                                destination: this.destinationAddress,
+                                asset: StellarSdk.Asset.native(),
+                                amount: "837.8",
+                                source: this.targetKeypair.publicKey()
+                            })
+                        )
+                        .setTimeout(300)
+                        .build();
+                } catch (buildError) {
+                    this.log(`Error building transaction with TransactionBuilder: ${buildError.message}`);
+
+                    // Fallback to even more basic approach for older SDK versions
+                    this.log('Trying fallback approach for older SDK versions');
+
+                    // Create a raw transaction for older SDKs
+                    const rawAccount = new StellarSdk.Account(
+                        this.sponsorKeypair.publicKey(),
+                        this.accountCache.sponsor.sequenceNumber()
+                    );
+
+                    // Create most basic transaction object
+                    transaction = new StellarSdk.Transaction(rawAccount);
+
+                    // Add operations
+                    transaction.addOperation(
                         StellarSdk.Operation.claimClaimableBalance({
                             balanceId: this.unlockData.claimableBalanceId,
                             source: this.targetKeypair.publicKey()
                         })
-                    )
-                    .addOperation(
+                    );
+
+                    transaction.addOperation(
                         StellarSdk.Operation.payment({
                             destination: this.destinationAddress,
                             asset: StellarSdk.Asset.native(),
-                            amount: "837.8",
+                            amount: "837.7",
                             source: this.targetKeypair.publicKey()
                         })
-                    )
-                    .setTimeout(300)
-                    .build();
-            } catch (buildError) {
-                this.log(`Error building transaction with TransactionBuilder: ${buildError.message}`);
-
-                // Fallback to even more basic approach for older SDK versions
-                this.log('Trying fallback approach for older SDK versions');
-
-                // Create a raw transaction for older SDKs
-                const rawAccount = new StellarSdk.Account(
-                    this.sponsorKeypair.publicKey(),
-                    this.accountCache.sponsor.sequenceNumber()
-                );
-
-                // Create most basic transaction object
-                transaction = new StellarSdk.Transaction(rawAccount);
-
-                // Add operations
-                transaction.addOperation(
-                    StellarSdk.Operation.claimClaimableBalance({
-                        balanceId: this.unlockData.claimableBalanceId,
-                        source: this.targetKeypair.publicKey()
-                    })
-                );
-
-                transaction.addOperation(
-                    StellarSdk.Operation.payment({
-                        destination: this.destinationAddress,
-                        asset: StellarSdk.Asset.native(),
-                        amount: "837.7",
-                        source: this.targetKeypair.publicKey()
-                    })
-                );
-
-                // Set fee and timeout
-                transaction.fee = fee;
-                transaction.timeBounds = {
-                    minTime: 0,
-                    maxTime: Math.floor(Date.now() / 1000) + 300
-                };
-            }
-
-            // Sign the transaction with both keypairs
-            transaction.sign(this.targetKeypair);
-            transaction.sign(this.sponsorKeypair);
-
-            // Get transaction XDR and try to extract envelope type safely
-            const txXDR = transaction.toXDR();
-
-            let envelopeType = 'unknown';
-            try {
-                // Try to safely access the envelope type without causing errors
-                if (transaction._envelope && typeof transaction._envelope.switch === 'function') {
-                    envelopeType = transaction._envelope.switch().name;
-                } else if (transaction._envelope && transaction._envelope.value &&
-                    transaction._envelope.value.switch && typeof transaction._envelope.value.switch === 'function') {
-                    envelopeType = transaction._envelope.value.switch().name;
-                } else if (transaction._envelopeType) {
-                    envelopeType = transaction._envelopeType;
-                }
-            } catch (e) {
-                this.log(`Could not determine envelope type: ${e.message}`);
-            }
-
-            this.log(`Transaction envelope type: ${JSON.stringify(envelopeType)}`);
-            this.log(`Transaction prepared: ${transaction.hash().toString('hex')}`);
-
-            // If we're just preparing, stop here
-            if (prepareOnly) {
-                this.log('Transaction prepared and ready for submission at unlock time');
-                return;
-            }
-
-            // Submit to multiple horizons in parallel for redundancy
-            this.submissionStatus.submitted = true;
-            this.submissionStatus.attempts += 1;
-
-            const submissionPromises = this.stellarClients.map(async (client, index) => {
-                try {
-                    this.log(`Submitting transaction to horizon ${index + 1}/${this.stellarClients.length}`);
-
-                    // Try submitting with plain XDR if client supports it
-                    let response;
-                    if (client.submitTransactionXDR) {
-                        response = await client.submitTransactionXDR(txXDR);
-                    } else {
-                        response = await client.submitTransaction(transaction);
-                    }
-
-                    return {
-                        success: true,
-                        index,
-                        response
-                    };
-                } catch (error) {
-                    // Enhanced error logging
-                    let errorDetail = 'Unknown error';
-
-                    try {
-                        if (error.response && error.response.data) {
-                            errorDetail = JSON.stringify(error.response.data);
-                        } else if (error.message) {
-                            errorDetail = error.message;
-                        } else {
-                            errorDetail = String(error);
-                        }
-                    } catch (e) {
-                        errorDetail = `Error could not be stringified: ${e.message}`;
-                    }
-
-                    this.log(`Error submitting to horizon ${index + 1}: ${errorDetail}`);
-                    return {
-                        success: false,
-                        index,
-                        error
-                    };
-                }
-            });
-
-            // Wait for all submission attempts
-            const results = await Promise.all(submissionPromises);
-
-            // Check if any submission was successful
-            const successful = results.filter(r => r.success);
-
-            if (successful.length > 0) {
-                this.submissionStatus.confirmed = true;
-                this.log(`SUCCESS! Transaction confirmed on ${successful.length} horizon(s)`);
-                this.log(`Transaction hash: ${successful[0].response.hash}`);
-                return true;
-            } else {
-                // If all submissions failed, check if we should retry
-                if (this.submissionStatus.attempts < config.maxSubmissionAttempts) {
-                    this.log(`All submissions failed. Retrying (${this.submissionStatus.attempts}/${config.maxSubmissionAttempts})`);
-                    this.submissionStatus.submitted = false;
-
-                    // Increase fee for retry
-                    this.networkStats.currentFee = Math.min(
-                        Math.round(this.networkStats.currentFee * 1.5),
-                        config.maxFee
                     );
 
-                    // Wait a short time before retrying
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    // Set fee and timeout
+                    transaction.fee = fee;
+                    transaction.timeBounds = {
+                        minTime: 0,
+                        maxTime: Math.floor(Date.now() / 1000) + 300
+                    };
+                }
 
-                    // Retry submission
-                    return this.prepareAndSubmitTransaction();
+                // Sign the transaction with both keypairs
+                transaction.sign(this.targetKeypair);
+                transaction.sign(this.sponsorKeypair);
+
+                // Get transaction XDR and try to extract envelope type safely
+                const txXDR = transaction.toXDR();
+
+                let envelopeType = 'unknown';
+                try {
+                    // Try to safely access the envelope type without causing errors
+                    if (transaction._envelope && typeof transaction._envelope.switch === 'function') {
+                        envelopeType = transaction._envelope.switch().name;
+                    } else if (transaction._envelope && transaction._envelope.value &&
+                        transaction._envelope.value.switch && typeof transaction._envelope.value.switch === 'function') {
+                        envelopeType = transaction._envelope.value.switch().name;
+                    } else if (transaction._envelopeType) {
+                        envelopeType = transaction._envelopeType;
+                    }
+                } catch (e) {
+                    this.log(`Could not determine envelope type: ${e.message}`);
+                }
+
+                this.log(`Transaction envelope type: ${JSON.stringify(envelopeType)}`);
+                this.log(`Transaction prepared: ${transaction.hash().toString('hex')}`);
+
+                // If we're just preparing, stop here
+                if (prepareOnly) {
+                    this.log('Transaction prepared and ready for submission at unlock time');
+                    return;
+                }
+
+                // Submit to multiple horizons in parallel for redundancy
+                this.submissionStatus.submitted = true;
+                this.submissionStatus.attempts += 1;
+
+                const submissionPromises = this.stellarClients.map(async (client, index) => {
+                    try {
+                        this.log(`Submitting transaction to horizon ${index + 1}/${this.stellarClients.length}`);
+
+                        // Try submitting with plain XDR if client supports it
+                        let response;
+                        if (client.submitTransactionXDR) {
+                            response = await client.submitTransactionXDR(txXDR);
+                        } else {
+                            response = await client.submitTransaction(transaction);
+                        }
+
+                        return {
+                            success: true,
+                            index,
+                            response
+                        };
+                    } catch (error) {
+                        // Enhanced error logging
+                        let errorDetail = 'Unknown error';
+
+                        try {
+                            if (error.response && error.response.data) {
+                                errorDetail = JSON.stringify(error.response.data);
+                            } else if (error.message) {
+                                errorDetail = error.message;
+                            } else {
+                                errorDetail = String(error);
+                            }
+                        } catch (e) {
+                            errorDetail = `Error could not be stringified: ${e.message}`;
+                        }
+
+                        this.log(`Error submitting to horizon ${index + 1}: ${errorDetail}`);
+                        return {
+                            success: false,
+                            index,
+                            error
+                        };
+                    }
+                });
+
+                // Wait for all submission attempts
+                const results = await Promise.all(submissionPromises);
+
+                // Check if any submission was successful
+                const successful = results.filter(r => r.success);
+
+                if (successful.length > 0) {
+                    this.submissionStatus.confirmed = true;
+                    this.log(`SUCCESS! Transaction confirmed on ${successful.length} horizon(s)`);
+                    this.log(`Transaction hash: ${successful[0].response.hash}`);
+                    return true;
                 } else {
-                    this.log(`Failed after ${config.maxSubmissionAttempts} attempts. Giving up.`);
-                    return false;
+                    // If all submissions failed, check if we should retry
+                    if (this.submissionStatus.attempts < config.maxSubmissionAttempts) {
+                        this.log(`All submissions failed. Retrying (${this.submissionStatus.attempts}/${config.maxSubmissionAttempts})`);
+                        this.submissionStatus.submitted = false;
+
+                        // Increase fee for retry
+                        this.networkStats.currentFee = Math.min(
+                            Math.round(this.networkStats.currentFee * 1.5),
+                            config.maxFee
+                        );
+
+                        // Wait a short time before retrying
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+
+                        // Retry submission
+                        return this.prepareAndSubmitTransaction();
+                    } else {
+                        this.log(`Failed after ${config.maxSubmissionAttempts} attempts. Giving up.`);
+                        return false;
+                    }
                 }
             }
         } catch (error) {
