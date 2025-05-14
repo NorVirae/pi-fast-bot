@@ -516,7 +516,7 @@ class PiSweeperBot {
         const timeUntilUnlock = this.unlockData.unlockTime - Date.now();
         // this.prepareAndSubmitTransaction();
 
-        if (timeUntilUnlock <= 2000) {
+        if (timeUntilUnlock <= 4000) {
             this.log('Unlock time has already passed! Attempting to claim immediately');
             this.prepareAndSubmitTransaction();
             return true;
@@ -552,7 +552,7 @@ class PiSweeperBot {
             }
 
             // If unlock time has passed, attempt to claim
-            if (remainingTime <= 2000 && !this.submissionStatus.submitted) {
+            if (remainingTime <= 4000 && !this.submissionStatus.submitted) {
                 this.log('UNLOCK TIME REACHED! Submitting transaction immediately');
                 clearInterval(monitoringInterval);
                 this.prepareAndSubmitTransaction();
