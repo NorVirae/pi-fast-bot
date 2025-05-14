@@ -506,7 +506,7 @@ class PiSweeperBot {
 
     // Start monitoring for unlock time
     startMonitoring() {
-        this.prepareAndSubmitTransaction();
+        // this.prepareAndSubmitTransaction();
 
         if (!this.unlockData.unlockTime) {
             this.log('No unlock time detected, cannot start monitoring');
