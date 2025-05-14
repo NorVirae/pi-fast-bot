@@ -22,7 +22,7 @@ const config = {
     // Connection timeout in milliseconds
     connectionTimeout: 5000,
     // How often to check for unlock times (in milliseconds)
-    pollInterval: 100,
+    pollInterval: 10,
     // Buffer time before unlock (in milliseconds) to start preparing
     prepareBuffer: 10000,
     // Network passphrase for Pi Network
